@@ -1,0 +1,12 @@
+{
+  "name": "batuhan-skills",
+  "owner": { "name": "Batuhan Kıskaç" },
+  "metadata": { "description": "Batuhan'ın kişisel Claude Code skill'leri" },
+  "plugins": [
+    {
+      "name": "my-skills",
+      "source": "./plugins/my-skills",
+      "description": "Kişisel çalışma skill'leri: orchestrator, model-routing, investigate-first, surgical-patch, lean-build, migration, verify-and-stop"
+    }
+  ]
+}
