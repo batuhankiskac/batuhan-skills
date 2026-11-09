@@ -1,0 +1,4 @@
+interface:
+  display_name: "İkinci Beyin Yaz"
+  short_description: "Write notes to the ~/IkinciBeyin second brain"
+  default_prompt: "Use $ikinci-beyin-yaz to record this work in the second brain."

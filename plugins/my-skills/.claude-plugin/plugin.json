@@ -1,6 +1,8 @@
 {
   "name": "my-skills",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Kişisel çalışma skill'leri",
-  "author": { "name": "Batuhan Kıskaç" }
+  "author": {
+    "name": "Batuhan Kıskaç"
+  }
 }

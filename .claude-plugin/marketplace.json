@@ -6,7 +6,7 @@
     {
       "name": "my-skills",
       "source": "./plugins/my-skills",
-      "description": "Kişisel çalışma skill'leri: orchestrator, model-routing, investigate-first, surgical-patch, lean-build, migration, verify-and-stop"
+      "description": "Kişisel çalışma skill'leri: orchestrator, model-routing, investigate-first, surgical-patch, lean-build, migration, verify-and-stop, ikinci-beyin-yaz"
     }
   ]
 }
