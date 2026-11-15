@@ -245,6 +245,8 @@ Before fan-out, provide minimal shared context:
 - useful paths
 - acceptance criteria
 - conventions that matter
+- for code-writing tasks: the `bug-hunt` spec (`.bughunt/spec.md`) and the
+  ledger's "Eliminated bug classes" as a do-not-write list (bug-hunt P0-P1)
 
 Do not send entire conversations or huge repository dumps.
 
@@ -441,6 +443,33 @@ Preferred sequence:
 Do not run the same full test suite independently in every worker unless there
 is a specific reason.
 
+## Code-writing tasks: quality pipeline (default, autonomous)
+
+Whenever the task writes or changes code (beyond a trivial edit), run the
+`bug-hunt` skill in **pipeline mode** (its section P) as part of this
+orchestration. Do not wait for the user to ask for testing, review or debugging,
+and do not hand intermediate steps back to the user.
+
+Mapping onto this skill:
+
+- Before fan-out (sections 7, 9): write the spec and pre-brief (bug-hunt P0-P1).
+- Fan-out (sections 4, 6, 13): each code lane gets an impl worker plus a blind
+  test worker that owns only test files (P2).
+- While other lanes are still running: gate, test, review and fix each finished
+  lane immediately (P3). This is pipelining, not waiting for the whole wave.
+- After collecting: integrate and verify once (P4), then a targeted hunt only
+  where the risk map still points (P5).
+- Finish only when bug-hunt's done criteria hold (P6).
+
+Skip the pipeline only for trivial edits (section 2) or when the user explicitly
+asks for a quick draft without verification.
+
+If the task is itself a bug-hunt on existing code (the user asks to find bugs,
+harden, debug or run a bug-hunt round), use bug-hunt **round mode** (its sections
+0-7) instead: fan out the unit x category review passes in parallel, collect and
+confirm findings at the root, and let one agent apply fixes. Fixes inside a round
+are already covered by its confirm-and-fix steps; do not start a nested pipeline.
+
 ---
 
 # 15. Failure Handling
@@ -529,7 +558,8 @@ Before finishing:
 3. integrate applicable changes,
 4. inspect the final state,
 5. verify the result,
-6. confirm the original user request is satisfied.
+6. for code-writing tasks: confirm bug-hunt's done criteria (P6) hold,
+7. confirm the original user request is satisfied.
 
 The user should receive the result of orchestration, not raw orchestration
 noise.
@@ -564,10 +594,13 @@ For each non-trivial task:
     Collect once
        |
        v
+    Code lanes: per-lane gate/test/review/fix as each finishes (bug-hunt P3)
+       |
+       v
     Integrate
        |
        v
-    Verify once
+    Verify once (+ targeted hunt only if risk map says so)
 
 Remember:
 
