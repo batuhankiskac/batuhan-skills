@@ -1,7 +1,8 @@
 # batuhan-skills
 
-Agent skills I use every day with Claude Code and other coding agents, packaged as a
-[Claude Code plugin marketplace](https://docs.claude.com/en/docs/claude-code/plugins).
+Agent skills I use every day with Claude Code and OpenAI Codex, packaged as a
+[Claude Code plugin marketplace](https://docs.claude.com/en/docs/claude-code/plugins). The same
+`SKILL.md` files also run in Codex.
 
 A skill is a Markdown file (`SKILL.md`) with a short frontmatter description. The agent
 reads only the descriptions up front and loads a skill's full body when a task matches it,
@@ -40,8 +41,8 @@ summary:
 | [`omp`](plugins/my-skills/skills/omp/SKILL.md) | Delegates work from Claude Code to the [oh-my-pi](https://github.com/can1357/oh-my-pi) coding agent, so two harnesses with different models can work on one task. |
 | [`ikinci-beyin-yaz`](plugins/my-skills/skills/ikinci-beyin-yaz/SKILL.md) | Writes decisions and lessons from any session into my Obsidian "second brain", a source-linked memory that is loaded back into agent context in later sessions. (Turkish) |
 
-Several skills also ship an `agents/openai.yaml` so the same instructions can be used by
-OpenAI-compatible agent runners.
+Most skills also ship an `agents/openai.yaml` with the display name, short description and
+default prompt Codex shows for the skill, so one skill body serves both agents.
 
 ## Install
 
@@ -70,6 +71,17 @@ project's `.claude/settings.json`:
 }
 ```
 
+### Codex
+
+Codex reads skills from `~/.agents/skills/`. Copy or symlink the skill folders there:
+
+```bash
+git clone https://github.com/batuhankiskac/batuhan-skills
+ln -s "$PWD"/batuhan-skills/plugins/my-skills/skills/* ~/.agents/skills/
+```
+
+Then call a skill by name in Codex, for example `$bug-hunt`.
+
 ## Layout
 
 ```
@@ -78,7 +90,7 @@ plugins/my-skills/
   .claude-plugin/plugin.json         plugin manifest (bump "version" on every change)
   skills/<name>/SKILL.md             one skill per folder
   skills/<name>/references/          templates loaded on demand
-  skills/<name>/agents/openai.yaml   optional config for other agent runners
+  skills/<name>/agents/openai.yaml   Codex metadata (display name, default prompt)
 ```
 
 To add a skill: create `plugins/my-skills/skills/<name>/SKILL.md`, bump `version` in
