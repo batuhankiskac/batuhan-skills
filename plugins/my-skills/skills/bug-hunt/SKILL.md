@@ -1,6 +1,6 @@
 ---
 name: bug-hunt
-description: Systematic, token-efficient bug finding for AI-written code. Has a pipeline mode the orchestrator runs automatically on every code-writing task, and a standalone round mode. Use when hardening, debugging or optimizing a codebase after generation, instead of repeated whole-repo "read and find bugs" rounds or ever-growing test suites. Drives deterministic gates first, a risk map, single-category targeted review passes, confirmation by failing test, bug-class elimination, test hygiene and a yield-based stop rule.
+description: Token-efficient bug finding for AI-written code. Round mode hardens an existing codebase (find bugs, harden, debug, "bug-hunt"); pipeline mode is run by the orchestrator only for high-risk code tasks (money, auth, data, concurrency, several large lanes) or when the user asks for thorough testing. Deterministic gates first, risk map, one unit x one category review passes, confirmation by failing test, bug-class elimination and a yield-based stop rule.
 ---
 
 # Bug Hunt
@@ -9,9 +9,9 @@ Goal: find the most real bugs per token. Not the most findings, not the most tes
 
 Two modes:
 
-- **Pipeline mode** (section P, used automatically by the orchestrator whenever a task
-  writes or changes code): quality checks run inside the build, per lane, as soon as
-  each lane finishes. The user gives the task once; the pipeline drives itself to a
+- **Pipeline mode** (section P, used by the orchestrator for high-risk code tasks;
+  ordinary code tasks use the orchestrator's light level instead): quality checks run
+  inside the build, per lane, as soon as each lane finishes. The user gives the task once; the pipeline drives itself to a
   verified result without asking the user what to do next.
 - **Round mode** (sections 0-7): a standalone hunting round over an existing codebase.
 

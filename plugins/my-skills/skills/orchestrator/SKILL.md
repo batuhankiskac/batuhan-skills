@@ -245,8 +245,8 @@ Before fan-out, provide minimal shared context:
 - useful paths
 - acceptance criteria
 - conventions that matter
-- for code-writing tasks: the `bug-hunt` spec (`.bughunt/spec.md`) and the
-  ledger's "Eliminated bug classes" as a do-not-write list (bug-hunt P0-P1)
+- for full-pipeline code tasks: the `bug-hunt` spec (`.bughunt/spec.md`) and
+  the ledger's "Eliminated bug classes" as a do-not-write list (bug-hunt P0-P1)
 
 Do not send entire conversations or huge repository dumps.
 
@@ -443,14 +443,33 @@ Preferred sequence:
 Do not run the same full test suite independently in every worker unless there
 is a specific reason.
 
-## Code-writing tasks: quality pipeline (default, autonomous)
+## Code-writing tasks: pick the quality level by risk
 
-Whenever the task writes or changes code (beyond a trivial edit), run the
-`bug-hunt` skill in **pipeline mode** (its section P) as part of this
-orchestration. Do not wait for the user to ask for testing, review or debugging,
-and do not hand intermediate steps back to the user.
+Every code-writing task ends verified; do not hand intermediate testing,
+review or debugging steps back to the user. How much process that takes
+depends on risk, not on the mere fact that code was written.
 
-Mapping onto this skill:
+**Light level (default).** For ordinary features, fixes and refactors:
+
+1. run the project's existing gate on the touched files (type check, lint),
+2. add or update tests for the changed behaviour only,
+3. run the affected tests,
+4. one review pass over the diff for its top 1-2 bug categories
+   (bug-hunt section 3 prompt); confirm a finding with a failing test
+   before fixing it.
+
+The light level writes no `.bughunt/` files into the repository.
+
+**Full pipeline.** Run `bug-hunt` **pipeline mode** (its section P) only when
+at least one of these holds:
+
+- the code touches money, auth, security, user data, persistence or
+  migrations, concurrency, or another path where a wrong result is silent or
+  hard to undo,
+- the task spans several independent code lanes (section 6) of real size,
+- the user asks for thorough testing, hardening or a bug-hunt.
+
+Mapping of the full pipeline onto this skill:
 
 - Before fan-out (sections 7, 9): write the spec and pre-brief (bug-hunt P0-P1).
 - Fan-out (sections 4, 6, 13): each code lane gets an impl worker plus a blind
@@ -461,8 +480,9 @@ Mapping onto this skill:
   where the risk map still points (P5).
 - Finish only when bug-hunt's done criteria hold (P6).
 
-Skip the pipeline only for trivial edits (section 2) or when the user explicitly
-asks for a quick draft without verification.
+Trivial edits (section 2) need only the check that proves them. Skip
+verification entirely only when the user explicitly asks for an unverified
+quick draft.
 
 If the task is itself a bug-hunt on existing code (the user asks to find bugs,
 harden, debug or run a bug-hunt round), use bug-hunt **round mode** (its sections
@@ -558,7 +578,8 @@ Before finishing:
 3. integrate applicable changes,
 4. inspect the final state,
 5. verify the result,
-6. for code-writing tasks: confirm bug-hunt's done criteria (P6) hold,
+6. for code-writing tasks: confirm the chosen quality level passed (light
+   level steps, or bug-hunt's P6 done criteria for the full pipeline),
 7. confirm the original user request is satisfied.
 
 The user should receive the result of orchestration, not raw orchestration
@@ -594,7 +615,7 @@ For each non-trivial task:
     Collect once
        |
        v
-    Code lanes: per-lane gate/test/review/fix as each finishes (bug-hunt P3)
+    Code lanes: light check, or per-lane bug-hunt P3 if high risk
        |
        v
     Integrate

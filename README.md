@@ -20,9 +20,11 @@ summary:
    context once and forbids recursive delegation.
 2. **Route.** `model-routing` sends each delegated task to the cheapest model that will get it
    right the first time, with escalation rules when a cheaper model fails.
-3. **Build inside a quality pipeline.** `bug-hunt` (pipeline mode) turns the request into
-   testable acceptance criteria, runs an implementation worker and a spec-only test worker in
-   parallel, and checks every finished lane while the others keep running.
+3. **Check by risk.** Ordinary code changes get a light check (gate, tests for the changed
+   behaviour, one review pass). High-risk work (money, auth, data, concurrency, several large
+   lanes) runs `bug-hunt` pipeline mode: testable acceptance criteria, an implementation worker
+   and a spec-only test worker in parallel, and every finished lane checked while the others
+   keep running.
 4. **Verify and stop.** Deterministic gates first, then targeted reviews, then a stop rule.
    Work is done when every acceptance criterion has a passing test and no finding is open.
 
@@ -32,13 +34,9 @@ summary:
 |---|---|
 | [`orchestrator`](plugins/my-skills/skills/orchestrator/SKILL.md) | Minimises wall-clock time without losing correctness: role detection (coordinator vs. delegated worker), independent workstreams, a standard brief format, file ownership to avoid edit conflicts, single integration and verification, and a list of anti-patterns (agent spam, fake parallelism, duplicate repo scans). |
 | [`model-routing`](plugins/my-skills/skills/model-routing/SKILL.md) | Chooses a model for every subagent: small model for mechanical, fully specified work; mid-tier for normal implementation, debugging and review; top-tier for ambiguous or high-stakes reasoning. Escalates on failure instead of defaulting everything to the largest model. |
-| [`bug-hunt`](plugins/my-skills/skills/bug-hunt/SKILL.md) | Finds the most real bugs per token. **Pipeline mode** runs inside every code-writing task. **Round mode** hardens an existing codebase: findings ledger, deterministic gate (semgrep, bandit, pip-audit, branch coverage), risk map, one unit × one bug category per review pass, confirmation by failing test, bug-class elimination, mutation-based test pruning and a yield-based stop rule. |
-| [`investigate-first`](plugins/my-skills/skills/investigate-first/SKILL.md) | Diagnoses unclear, intermittent or performance failures with evidence-ranked hypotheses before any code changes. |
-| [`surgical-patch`](plugins/my-skills/skills/surgical-patch/SKILL.md) | Fixes a bug at the narrowest layer that owns the wrong behaviour, with regression proof and no drive-by refactoring. |
-| [`lean-build`](plugins/my-skills/skills/lean-build/SKILL.md) | Builds new features with strict scope, maximum reuse of existing code and an explicit stop condition, to prevent overbuilding. |
-| [`migration`](plugins/my-skills/skills/migration/SKILL.md) | Reversible, compatibility-safe transitions for schemas, data, APIs, configuration and dependencies, with rollback and preservation proof. |
-| [`verify-and-stop`](plugins/my-skills/skills/verify-and-stop/SKILL.md) | Proves existing work meets its acceptance conditions without expanding scope. |
+| [`bug-hunt`](plugins/my-skills/skills/bug-hunt/SKILL.md) | Finds the most real bugs per token. **Pipeline mode** runs inside high-risk code tasks. **Round mode** hardens an existing codebase: findings ledger, deterministic gate (semgrep, bandit, pip-audit, branch coverage), risk map, one unit × one bug category per review pass, confirmation by failing test, bug-class elimination, mutation-based test pruning and a yield-based stop rule. |
 | [`omp`](plugins/my-skills/skills/omp/SKILL.md) | Delegates work from Claude Code to the [oh-my-pi](https://github.com/can1357/oh-my-pi) coding agent, so two harnesses with different models can work on one task. |
+| [`agy`](plugins/my-skills/skills/agy/SKILL.md) | Delegates work from Claude Code to the Antigravity CLI (`agy`) coding agent, with permission modes, resumable conversations and a table of known errors. (Turkish) |
 | [`ikinci-beyin-yaz`](plugins/my-skills/skills/ikinci-beyin-yaz/SKILL.md) | Writes decisions and lessons from any session into my Obsidian "second brain", a source-linked memory that is loaded back into agent context in later sessions. (Turkish) |
 
 Most skills also ship an `agents/openai.yaml` with the display name, short description and
