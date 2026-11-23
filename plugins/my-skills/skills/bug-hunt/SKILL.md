@@ -5,234 +5,145 @@ description: Token-efficient bug finding for AI-written code. Round mode hardens
 
 # Bug Hunt
 
-Goal: find the most real bugs per token. Not the most findings, not the most tests.
+Find the most real bugs per token, not the most findings or the most tests.
+The approach rests on a few ideas:
 
-Two modes:
+- Tools before models: never spend model tokens finding what a type checker,
+  linter or scanner finds for free.
+- Narrow passes beat whole-repo reads: one unit and one bug category at a time.
+- A finding is not a bug until a failing test or reproduction shows it.
+- Fixing the class (the pattern everywhere, ideally with a rule) beats fixing
+  the instance.
+- Tests are worth what they catch, not their count.
+- Yield falls off; stop when it does.
 
-- **Pipeline mode** (section P, used by the orchestrator for high-risk code tasks;
-  ordinary code tasks use the orchestrator's light level instead): quality checks run
-  inside the build, per lane, as soon as each lane finishes. The user gives the task once; the pipeline drives itself to a
-  verified result without asking the user what to do next.
-- **Round mode** (sections 0-7): a standalone hunting round over an existing codebase.
+Two modes: **round mode** (sections 0-7) hunts in an existing codebase;
+**pipeline mode** (section P) builds quality into a high-risk code task.
 
-Core rules:
+## 0. Ledger
 
-1. Deterministic tools before LLM reading. Never ask a model to find what a tool finds for free.
-2. Never review the whole repo in one pass. One target unit x one bug category per pass.
-3. A finding is not a bug until a failing test or reproduction proves it.
-4. Fix the bug class, not only the instance.
-5. Tests are measured by what they catch (mutation score), not by count.
-6. Stop when yield drops. Bug hunting has diminishing returns.
+Use the project's existing findings file, or create `.bughunt/ledger.md` from
+`references/ledger-template.md`. It is the memory between passes: every pass
+reads it, nothing already listed (open, fixed or rejected) is reported again,
+and rejected false positives stay so they are not raised twice.
 
----
+## 1. Deterministic gate
 
-## 0. Ledger (single source of truth)
+Run what the project already has (type checker, linter, tests), then add
+cheap missing tools where they fit. Python: `mypy`, `ruff`, `bandit`,
+`pip-audit`, `semgrep --config auto`, `pytest --cov --cov-branch`.
+JS/TS: `tsc --noEmit`, `eslint`, `npm audit`, `semgrep`, `vitest --coverage`.
+Gate output goes straight to the fixer; reviewers do not re-look for these
+error types.
 
-Use the project's existing findings file if one exists. Otherwise create
-`.bughunt/ledger.md` from `references/ledger-template.md`.
+## 2. Risk map
 
-Every pass reads the ledger first and must not re-report anything already listed
-(open, fixed or rejected). Rejected false positives stay in the ledger so they
-are never raised again.
-
-Each round appends one line to the yield table (section 7).
-
-## 1. Deterministic gate (zero LLM tokens)
-
-Run what the project already has (type checker, linter, existing tests). Then add
-the cheap tools that are missing. Python example:
-
-```bash
-mypy --strict <pkg>            # or the project's configured type check
-ruff check .
-bandit -q -r <pkg>             # security smells
-pip-audit                      # vulnerable dependencies
-semgrep --config auto --error  # generic bug patterns + project rules in .semgrep/
-pytest -q -x --cov=<pkg> --cov-report=json --cov-branch
-```
-
-JS/TS equivalents: `tsc --noEmit`, `eslint`, `npm audit`, `semgrep`, `vitest --coverage`.
-
-Gate output is fed to the fixer as-is. Do not ask a model to "look for" type,
-lint or known-pattern errors after this step.
-
-## 2. Risk map (decide where to look)
-
-Rank units (module / file / function) by a simple score and review only the top ones:
-
-- **Uncovered branches**: from `coverage.json` (`missing_branches`, `missing_lines`).
-- **Churn**: `git log --since=30.days --name-only --format= | sort | uniq -c | sort -rn`
-- **Complexity**: `radon cc -s -n C <pkg>` (or `ruff --select C901`).
-- **Boundaries**: code that parses input, touches I/O, network, DB, money, time, concurrency or auth.
-- **Ledger density**: units that already produced bugs usually have more.
-
-Write the ranked list (top 5-15 units) into the ledger under "Targets".
-Units with high coverage, low churn, low complexity and no boundary role are skipped.
+Review where bugs are likely, not everywhere. Useful signals: uncovered
+branches (coverage report), churn (`git log --since=30.days --name-only`),
+complexity (`radon cc` or `ruff --select C901`), boundary code (input
+parsing, I/O, network, DB, money, time, concurrency, auth) and units that
+already produced bugs. Record the top targets (typically 5-15) in the ledger;
+well-covered, stable, simple, non-boundary code can be skipped.
 
 ## 3. Targeted review passes
 
-One pass = one target unit + one category + only the context it needs
-(the unit, its direct callers/callees signatures, the relevant spec lines, the ledger).
-Prefer the diff since the last round over full files.
-
-Categories (pick the ones that apply to the unit, highest risk first):
+One pass covers one target unit and one category, with only the context it
+needs (the unit, direct callers/callees, relevant spec lines, the ledger);
+prefer the diff since the last round over full files.
 
 | Code | Category | Look for |
 |---|---|---|
 | ERR | Error handling | swallowed exceptions, wrong except scope, missing cleanup, partial writes |
 | BND | Boundaries | empty/None/zero/negative/huge input, off-by-one, unicode, timezones |
-| STATE | State & data flow | stale state, mutation of shared/default args, ordering assumptions, cache invalidation |
-| CONC | Concurrency | races, missing locks/awaits, non-atomic check-then-act, retries without idempotency |
-| RES | Resources | unclosed files/connections, unbounded growth, leaks, missing timeouts |
+| STATE | State & data flow | stale state, shared/default arg mutation, ordering assumptions, cache invalidation |
+| CONC | Concurrency | races, missing locks/awaits, check-then-act, retries without idempotency |
+| RES | Resources | unclosed handles, unbounded growth, leaks, missing timeouts |
 | SEC | Security | injection, path traversal, unsafe deserialization, secrets, authz gaps |
-| CONTRACT | Spec conformance | behavior differing from the spec/acceptance criteria, wrong defaults |
+| CONTRACT | Spec conformance | behaviour differing from spec or acceptance criteria, wrong defaults |
 | PERF | Performance | N+1, quadratic loops, repeated I/O in loops, needless copies |
 
-Reviewer instructions (paste into the subagent prompt):
+Reviewer brief:
 
 ```
-You are reviewing <unit> for category <CODE> only. Ignore every other category.
-Read the ledger first; do not report anything already listed.
-Report at most 5 findings. For each give:
-  id, file:line, category, one-sentence defect,
-  concrete trigger (input/state) -> wrong result,
-  confidence (high/medium/low).
-No style comments. No speculative "could be improved". If nothing is found, say NONE.
+Review <unit> for category <CODE> only. Read the ledger first and skip
+anything already listed. Report a handful of findings at most (around 5),
+each with file:line, a one-sentence defect, the concrete trigger and wrong
+result, and your confidence. No style remarks or speculative improvements.
+Say NONE if nothing is found.
 ```
 
-Model routing: pick every reviewer / tester / fixer model with the `model-routing`
-skill (typically haiku or sonnet for review passes, sonnet for fixes, opus only for
-hard or high-stakes fixes) and pass `model` explicitly. Independent passes
-(different units or categories) run in parallel per the orchestrator skill;
-reviewers never spawn further agents.
+Independent passes run in parallel (see `orchestrator`); choose models with
+`model-routing`. Reviewers do not spawn agents.
 
 ## 4. Confirm before fixing
 
-For every finding, write the smallest failing test or reproduction script first.
+Write the smallest failing test or reproduction for each finding. If it
+passes, mark the finding rejected (not reproducible); if it fails, mark it
+confirmed and fix it. Property-based tests (Hypothesis, fast-check) suit bugs
+about input ranges. For untested units, tests written from the spec by an
+agent that has not read the implementation avoid encoding its bugs as
+correct.
 
-- Passes immediately -> mark `rejected (not reproducible)` in the ledger. No fix.
-- Fails -> mark `confirmed`, then fix.
+## 5. Eliminate the class
 
-Prefer a property-based test (Hypothesis / fast-check) when the bug is about a
-range of inputs; it replaces many example tests.
+After a confirmed fix, name the pattern in one line, search the codebase for
+it (`rg`, `ast-grep`, a quick semgrep pattern), fix the other real instances,
+and where it is mechanically detectable add a `.semgrep/` or lint rule so the
+gate catches it from now on. Record pattern, instance count and rule in the
+ledger.
 
-Spec-derived tests: when a unit has no tests, have an agent that has NOT read the
-implementation write property tests from the spec / docstring / acceptance
-criteria only. Tests written from the code tend to encode its bugs as correct.
+## 6. Test hygiene
 
-## 5. Fix and eliminate the class
-
-After each confirmed fix:
-
-1. Name the pattern in one line (e.g. "dict.get result used without None check").
-2. Search the whole codebase for it: `rg`, `ast-grep` or a quick `semgrep` pattern.
-3. Fix every instance found (each still needs a reproduction or is obviously the same defect).
-4. If the pattern is mechanically detectable, add a rule to `.semgrep/` (or a lint
-   config) so the gate in step 1 catches it forever.
-5. Record pattern, instance count and rule file in the ledger.
-
-## 6. Test hygiene (keep the suite lean)
-
-- Keep one regression test per confirmed bug, named after the ledger id.
-- On modules touched this round run mutation testing:
-  `mutmut run --paths-to-mutate <module>` (Python) or `npx stryker run` (JS/TS).
-- Surviving mutants show real test gaps: add a targeted (preferably property) test.
-- Tests that kill no mutants that other tests do not already kill are candidates
-  for deletion. Delete or merge them rather than letting the suite grow.
-- For parsers and external-input entry points, a short fuzz run
-  (`atheris`, Hypothesis `@given` with large budgets) is cheaper than hand-written cases.
+Keep one regression test per confirmed bug, named after its ledger id. On
+touched modules, mutation testing (`mutmut`, `stryker`) shows real gaps:
+surviving mutants deserve a targeted test, and tests that kill nothing unique
+are candidates to merge or delete. For parsers and input entry points a short
+fuzz run is cheaper than hand-written cases.
 
 ## 7. Stop rule
 
-After each round append to the ledger yield table:
+Append a yield row per round: `round | units | findings | confirmed |
+rejected | critical | approx cost`. Stop broad hunting once yield has clearly
+dropped, by default when two consecutive rounds bring few confirmed bugs
+(fewer than 3), nothing critical (data loss, security, crash on a common
+path), and mostly false positives (over half). After that, react only to real
+signals (failing CI, runtime errors, user reports) with the stack trace and
+the few relevant files, not the whole repo.
 
-`round | units reviewed | findings | confirmed | rejected | critical | tokens/approx cost`
+## P. Pipeline mode
 
-Stop broad hunting when, for 2 consecutive rounds:
+Used by the orchestrator for high-risk code tasks. The root drives it to a
+verified result; it asks the user only if a wrong assumption would be
+expensive to undo, otherwise it records the assumption and continues.
 
-- confirmed bugs < 3, AND
-- no critical (data loss, security, crash on common path), AND
-- false-positive rate > 50%.
+- **P0 Contract.** Write `.bughunt/spec.md`: testable acceptance criteria,
+  public interfaces per unit, properties and invariants, assumptions.
+- **P1 Pre-brief.** Every worker gets the spec, the ledger's eliminated bug
+  classes as patterns to avoid, and the 1-3 categories most relevant to its
+  unit.
+- **P2 Build lanes.** Per ownership unit, start together an implementation
+  worker and a blind test worker that writes acceptance and property tests
+  from the spec without reading the implementation and owns only test files.
+- **P3 Lane gate.** As each lane finishes, without waiting for the others:
+  scoped gate, that lane's blind tests, one cheap review pass for its top
+  categories, confirmation of findings, and fixes by the same implementation
+  worker. Loop a few times (around 3); if it still fails, escalate the fixer
+  model, then mark the lane blocked with evidence. When a blind test fails,
+  the spec decides: a clear spec means the code is wrong; an ambiguous spec
+  means the root decides, records it in the spec and fixes the wrong side.
+  Confirmed bugs go through section 5.
+- **P4 Integration.** Merge lanes, then once: full gate, full suite, and a
+  short end-to-end run of the real entry points against the acceptance
+  criteria.
+- **P5 Targeted hunt.** Only where the risk map still points after P4 (low
+  coverage, high complexity, boundary role, integration failures); usually at
+  most two rounds, with the stop rule.
+- **P6 Done** when every acceptance criterion has a passing test, the gate is
+  green, no confirmed finding is open, and the stop rule or round limit is
+  reached. Report result, assumptions, blocked items with evidence and
+  residual risk.
 
-After stopping, only react to real signals: failing CI, runtime errors, user reports.
-For those, give the debugger the stack trace plus the 2-3 relevant files, never the repo.
+## Delegated workers
 
-## P. Pipeline mode (autonomous, used by the orchestrator)
-
-The root agent runs this end to end. It does not hand steps back to the user.
-It asks the user only once, at P0, and only if a wrong guess would be expensive
-to undo; otherwise it records its assumptions and continues.
-
-### P0. Contract
-Turn the task into `.bughunt/spec.md`:
-- acceptance criteria (each one testable),
-- public interfaces / signatures per unit,
-- properties and invariants ("output sorted", "round-trip equal", "never negative"),
-- explicit assumptions made.
-
-### P1. Pre-brief (prevention)
-Add to the shared context every worker receives:
-- the spec,
-- the ledger's "Eliminated bug classes" as a **do-not-write list**,
-- the 2-3 bug categories most relevant to each unit (from the table in section 3).
-
-### P2. Build lanes (truly concurrent)
-For each ownership unit (per orchestrator section 6) start, in one fan-out:
-- **Impl worker**: writes the code for the unit.
-- **Blind test worker**: writes acceptance and property-based tests from the spec
-  only, never reading the implementation. Owns only test files, so there is no
-  file overlap with the impl worker.
-
-### P3. Lane gate (pipelined, per lane, as soon as the impl worker finishes)
-Do not wait for other lanes. For the finished lane:
-1. Deterministic gate scoped to the lane's files (type check, lint, semgrep rules).
-2. Run that lane's blind tests (wait for the test worker if still running).
-3. One cheap review pass on the lane's diff for its top 1-2 categories (section 3 prompt).
-4. Confirm findings (section 4). Send confirmed findings and failing test output back
-   to the **same** impl worker (continue it, do not start a fresh one) to fix.
-5. Repeat 1-4 until the lane is clean, max 3 loops. Then escalate the fixer model per
-   `model-routing`; if still failing, mark the lane `blocked` with the evidence.
-
-When a blind test fails, decide against the spec, not the code: if the spec is clear,
-the code is wrong; if the spec is ambiguous, the root decides, records the decision in
-the spec, and fixes whichever side is wrong.
-
-Each confirmed bug goes into the ledger and through section 5 (pattern search, rule).
-
-### P4. Integration
-Root merges lanes, then runs once: full deterministic gate, full test suite, and a
-small end-to-end smoke run of the real entry point(s) against the acceptance criteria.
-
-### P5. Targeted hunt (only if needed)
-Run a round-mode hunt (sections 2-6) only on units that, after P4, still rank high on
-the risk map (low branch coverage, high complexity, boundary role) or caused
-integration failures. Max 2 rounds in pipeline mode; apply the stop rule (section 7).
-
-### P6. Done
-The task is complete only when:
-- every acceptance criterion has a passing test,
-- the gate is green,
-- no confirmed finding is open,
-- the stop rule is met or the P5 round limit is reached.
-
-Final report to the user: result, assumptions made, blocked items with evidence,
-residual risk. No step-by-step narration.
-
-## Round checklist
-
-```
-[ ] read ledger
-[ ] step 1 gate green (or failures handed to fixer)
-[ ] risk map updated, targets chosen
-[ ] review passes: unit x category, cheap model, max 5 findings each
-[ ] every finding reproduced or rejected
-[ ] fixes + pattern search + rule added where possible
-[ ] mutation test on touched modules, prune dead tests
-[ ] yield row appended, stop rule checked
-```
-
-## Delegated worker rule
-
-If you were spawned to run one review pass, one confirmation or one fix, do only
-that, return results in the ledger format, and do not start a new round or
-spawn agents.
+A worker spawned for one review pass, confirmation or fix does only that,
+returns results in ledger format, and does not start rounds or spawn agents.

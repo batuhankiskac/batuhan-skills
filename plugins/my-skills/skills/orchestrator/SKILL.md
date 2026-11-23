@@ -1,671 +1,100 @@
 ---
 name: orchestrator
 description: >
-  Proactively use for every non-trivial coding, debugging, refactoring,
-  investigation, research, or multi-file task where independent work can be
-  executed concurrently, and whenever the user asks to save limits by
-  delegating to cheaper models (opus root, haiku/sonnet workers), even on
-  small tasks. Optimize wall-clock completion time by decomposing
-  work into independent workstreams, delegating them in parallel when
-  subagents are available, minimizing duplicate exploration, preventing
-  recursive delegation, and performing consolidated integration and
-  verification.
+  Use for non-trivial coding, debugging, refactoring, investigation or research
+  tasks where independent work can run in parallel, and whenever the user asks
+  to save limits by delegating to cheaper models (expensive root, haiku/sonnet
+  workers), even on small tasks. Covers when to delegate, how to split work,
+  and how much verification a code change needs.
 ---
 
 # Orchestrator
 
-Optimize primarily for:
+The point of delegation is a shorter reliable path to a verified result, or
+fewer tokens on the expensive model. More agents is never the goal: each one
+adds startup cost, context cost and merge risk.
 
-> Minimum wall-clock completion time while preserving correctness.
-
-Do not optimize for maximum agent count.
-
-The fastest execution usually comes from:
-
-1. Removing unnecessary work.
-2. Identifying independent workstreams.
-3. Running those workstreams concurrently.
-4. Avoiding duplicated repository exploration.
-5. Avoiding recursive subagent spawning.
-6. Integrating results once.
-7. Verifying the integrated result once.
-
----
-
-# 1. Determine Your Role
-
-Before orchestrating, determine whether you are:
-
-- the root/coordinating agent, or
-- a delegated worker/subagent.
-
-## Delegated worker rule
-
-If you were created or delegated by another agent to perform a specific task:
-
-DO NOT orchestrate again by default.
-
-Do not spawn more agents merely because this skill exists.
-
-Instead:
-
-1. Execute the assigned work directly.
-2. Remain inside the assigned scope.
-3. Avoid unrelated repository exploration.
-4. Perform only relevant validation.
-5. Return concise findings/results to the parent.
-
-Nested delegation is allowed only when:
-
-- the parent explicitly requested it, or
-- the assigned task itself contains multiple expensive and clearly independent
-  branches and nested delegation provides a substantial wall-clock benefit.
-
-Default behavior for delegated workers is direct execution.
-
-This prevents:
-
-    Root
-      ├── Worker
-      │    ├── Worker
-      │    └── Worker
-      └── Worker
-           ├── Worker
-           └── Worker
-
-from appearing unnecessarily.
-
----
-
-# 2. Decide Whether Orchestration Helps
-
-Pick one of three goals first; they lead to different decisions.
+## Pick the goal first
 
 | Goal | When | Shape |
 |---|---|---|
-| **Speed** (default) | 2+ substantial independent workstreams | parallel workers, rules below |
-| **Limit saving** | the user asks for it ("ucuz modda", "limit gitmesin", "başta opus altta haiku"), or the root runs on an expensive model and the task has mechanical parts | delegation even for small tasks, see 2.1 |
-| **Team mode** | the user asks for it ("takım modunda", "ekip gibi") on a large, open-ended task | use the `team-mode` skill instead of this skill |
-
-In team mode the team workflow already contains per-lane review/fix and an
-adversarial final review. Do not add this skill's quality levels (section 14)
-or a bug-hunt pipeline on top; the root only does team-mode's after-run checks.
-
-## 2.1 Limit-saving delegation
-
-The goal is to keep tokens off the expensive root model, not to save
-wall-clock time. Here even small tasks may be delegated:
-
-- The root (often opus) only decides, writes precise briefs and verifies.
-- Reading, searching, summarising logs, running commands and mechanical
-  edits go to `haiku`; ordinary implementation to `sonnet` (`model-routing`).
-- Briefs must be fully specified (exact files, exact change, exact output
-  format) because cheap models fail on ambiguity.
-- Ask for short structured returns (paths, line numbers, diff summary), never
-  full file dumps; the root reads only the lines it must check.
-- The root verifies every result itself with a cheap check (diff, test run)
-  before reporting.
-- Do not delegate when the brief would cost more to write than the work
-  itself (a one-line edit the root already has in view).
-
-## 2.2 Speed: when not to delegate
-
-Do not delegate trivial tasks for speed.
-
-Work directly for tasks such as:
-
-- one small obvious edit
-- one known bug in one location
-- a simple question
-- a tiny configuration change
-- one command
-- localized formatting
-- a straightforward single-file implementation
-
-Orchestrate when there are at least two substantial independent workstreams.
-
-Typical examples:
-
-- inspect frontend and backend independently
-- analyze separate modules
-- investigate several possible root causes
-- inspect implementation and tests concurrently
-- research multiple independent questions
-- review several unrelated components
-- perform broad repository reconnaissance
-- implement changes in isolated file groups
-
-Ask:
-
-> Can this work be removed from the critical path by running it concurrently?
-
-If not, do not create another agent.
-
----
-
-# 3. Critical Path First
-
-Identify the work that determines total completion time.
-
-Prioritize parallelization of those tasks.
-
-Do not spend worker capacity on low-value side work while the main critical
-path remains serial.
-
-Example:
-
-BAD:
-
-    Worker A -> rename variables
-    Worker B -> format documentation
-
-while the root spends ten minutes investigating the actual bug.
-
-BETTER:
-
-    Worker A -> trace request lifecycle
-    Worker B -> inspect parser state transitions
-    Root     -> inspect reproduction/test failure
-
-All three attack the critical path concurrently.
-
----
-
-# 4. Breadth-First Parallelism
-
-Independent tasks should start together.
-
-BAD:
-
-    start A
-    wait A
-    start B
-    wait B
-    start C
-    wait C
-
-GOOD:
-
-    identify A, B, C
-    launch A + B + C
-    continue useful root work
-    collect results
-
-If the runtime supports a batch or parallel task/subagent interface, prefer one
-batched fan-out operation.
-
-Avoid serial agent creation when assignments are independent.
-
----
-
-# 5. Worker Count
-
-More workers are not automatically faster.
-
-Default guidance:
-
-- 0 workers: trivial/localized work
-- 2 workers: ordinary parallel task
-- 3 workers: broad task
-- 4 workers: large task with clean ownership boundaries
-
-Use more only when decomposition is extremely clear.
-
-Every worker adds:
-
-- startup latency
-- context cost
-- coordination cost
-- duplicate exploration risk
-- merge/conflict risk
-
-Use the smallest worker count that materially reduces the critical path.
-
----
-
-# 6. Decompose by Ownership
-
-Assignments must be narrow and independently executable.
-
-Good boundaries include:
-
-- file
-- directory
-- module
-- subsystem
-- responsibility
-- investigation question
-- test surface
-
-GOOD:
-
-    Worker A:
-    Inspect HTTP request parsing in src/http/.
-    Find unnecessary state transitions.
-    Do not edit files.
-    Return file paths and concrete findings.
-
-GOOD:
-
-    Worker B:
-    Inspect connection lifecycle in src/network/.
-    Identify duplicated cleanup logic.
-    Do not modify parser code.
-
-BAD:
-
-    Analyze the whole repository and improve it.
-
-Avoid having multiple workers modify the same files.
-
-If several investigations may converge on the same file:
-
-1. parallelize analysis,
-2. collect findings,
-3. let one agent/root perform the edit.
-
----
-
-# 7. Share Context Once
-
-Do not make every worker rediscover information already known.
-
-Before fan-out, provide minimal shared context:
-
-- objective
-- relevant constraints
-- known architecture
-- useful paths
-- acceptance criteria
-- conventions that matter
-- for full-pipeline code tasks: the `bug-hunt` spec (`.bughunt/spec.md`) and
-  the ledger's "Eliminated bug classes" as a do-not-write list (bug-hunt P0-P1)
-
-Do not send entire conversations or huge repository dumps.
-
-Worker context should be just enough to begin immediately.
-
----
-
-# 8. Avoid Duplicate Exploration
-
-Repository-wide scanning is often expensive.
-
-If one worker owns architecture discovery, other workers should not repeat the
-same full scan.
-
-Prefer:
-
-    one broad discovery
-         ↓
-    targeted parallel reads
-
-over:
-
-    Worker A -> scan everything
-    Worker B -> scan everything
-    Worker C -> scan everything
-
-Share useful paths and discoveries with later work whenever possible.
-
----
-
-# 9. Exploration Before Parallel Editing
-
-If architecture, ownership, or root cause is unclear, first run a short
-reconnaissance wave.
-
-Example:
-
-    Worker A -> trace request flow
-    Worker B -> inspect error handling
-    Worker C -> inspect tests
-
-Then determine implementation ownership.
-
-Do not immediately launch several editing workers into overlapping code.
-
----
-
-# 10. Root Agent Must Stay Productive
-
-After launching workers, the root should not duplicate their assignments.
-
-Useful root work includes:
-
-- analyzing the critical integration point
-- preparing merge strategy
-- reading acceptance criteria
-- inspecting shared interfaces
-- handling a separate critical-path branch
-- planning final verification
-
-Do not repeatedly poll workers when the environment supports completion
-notifications or asynchronous task collection.
-
----
-
-# 11. Tool-Aware Parallelism
-
-Use available runtime capabilities.
-
-If the environment provides:
-
-- subagents
-- task workers
-- batch tasks
-- parallel tool calls
-- scouts
-- reviewers
-- explorers
-
-use the cheapest appropriate mechanism.
-
-Prefer specialized lightweight workers for:
-
-- repository search
-- file discovery
-- test discovery
-- simple reconnaissance
-
-Reserve expensive reasoning workers for work that actually requires complex
-reasoning.
-
-Pick each worker's model with the `model-routing` skill (haiku / sonnet /
-opus by task) and pass `model` explicitly on every spawn.
-
-If no subagent mechanism exists, still apply the orchestration principles to
-tool calls and work ordering.
-
-External coding agents (`omp`, `agy`) exist on this machine but are optional
+| **Speed** (default) | two or more substantial, independent workstreams | parallel workers |
+| **Limit saving** | the user asks ("ucuz modda", "limit gitmesin", "başta opus altta haiku"), or the root runs on an expensive model and the task has mechanical parts | delegate even small pieces |
+| **Team mode** | the user asks ("takım modunda", "ekip gibi") on a large, open-ended task | use the `team-mode` skill instead of this one |
+
+In team mode the team workflow already reviews per lane and at the end; do
+not add this skill's quality levels or a bug-hunt pipeline on top.
+
+**Limit saving.** The root decides, writes briefs and verifies; reading,
+searching, running commands and mechanical edits go to haiku, ordinary
+implementation to sonnet. Cheap models fail on ambiguity, so briefs name the
+exact files, change and return format, and returns are short (paths, lines,
+diff summary) rather than file dumps. Skip delegation when writing the brief
+costs more than doing the work.
+
+**Speed.** Work directly when there is one critical path (a known bug, a
+single-file change, a question). Delegate when separate branches can come off
+the critical path: independent modules, competing root-cause hypotheses,
+implementation vs. tests, separate research questions.
+
+## If you are a delegated worker
+
+Do the assigned work directly, stay in scope, and return concise results. Do
+not spawn further agents unless the parent asked for it. This keeps the tree
+one level deep.
+
+## Splitting work
+
+- Split by ownership (directory, module, question, test surface). Two workers
+  never edit the same file; when investigations may converge on one file,
+  parallelise the analysis and let one agent edit.
+- If ownership or root cause is unclear, run a short read-only scouting wave
+  before any parallel edits.
+- Explore broadly once and share what was learned; workers should not each
+  rescan the repository.
+- Give each worker only what it needs to start: goal, scope, constraints,
+  useful paths, what "done" means and what to return. Ask for
+  integration-ready output, not narratives.
+- Launch independent workers together, keep the root busy with its own
+  critical-path work, and rely on completion notifications instead of polling.
+- Pick each worker's model with `model-routing`.
+- When one worker fails, keep the successful results and retry or take over
+  only the failed branch.
+
+External coding agents (`omp`, `agy`) exist on this machine as optional
 support the user adds when Claude limits run low. Use them only when the user
-explicitly says so in the current request ("omp'ye ver", "agy kullan"); never
-probe or test whether they are available on your own.
-
----
-
-# 12. Worker Prompt Contract
-
-Worker assignments should approximately contain:
-
-## Context
-
-Only the background required to begin.
-
-## Objective
-
-Exactly one concrete outcome.
-
-## Scope
-
-Specific files/modules/questions owned by the worker.
-
-## Constraints
-
-Relevant technical requirements.
-
-## Do Not
-
-- do not recursively delegate
-- do not expand scope
-- do not modify unrelated files
-- do not repeat expensive global checks
-- do not perform work owned by another worker
-
-## Return
-
-Concise integration-ready output such as:
-
-- root cause
-- findings
-- file paths
-- changed files
-- risks
-- tests needed
-- unresolved questions
-
-Avoid long narrative reports unless required.
-
----
-
-# 13. Parallel Editing Rules
-
-Parallel editing is appropriate only when ownership is clean.
-
-Safe:
-
-    Worker A -> src/parser/*
-    Worker B -> src/network/*
-    Worker C -> tests/cgi/*
-
-Unsafe:
-
-    Worker A -> RequestHandler.cpp
-    Worker B -> RequestHandler.cpp
-    Worker C -> RequestHandler.cpp
-
-When ownership overlaps, parallelize investigation instead of modification.
-
----
-
-# 14. Verification
-
-Avoid repeating expensive full-project checks inside every worker.
-
-Workers should perform targeted validation relevant to their task.
-
-Examples:
-
-- affected unit tests
-- compile affected module
-- targeted type check
-- inspect generated diff
-- reproduce the specific bug
-
-After integration, root performs consolidated verification.
-
-Preferred sequence:
-
-    parallel work
-        ↓
-    collect results
-        ↓
-    integrate
-        ↓
-    inspect diff
-        ↓
-    targeted verification
-        ↓
-    broader test/build only when justified
-
-Do not run the same full test suite independently in every worker unless there
-is a specific reason.
-
-## Code-writing tasks: pick the quality level by risk
-
-Every code-writing task ends verified; do not hand intermediate testing,
-review or debugging steps back to the user. How much process that takes
-depends on risk, not on the mere fact that code was written.
-
-**Light level (default).** For ordinary features, fixes and refactors:
-
-1. run the project's existing gate on the touched files (type check, lint),
-2. add or update tests for the changed behaviour only,
-3. run the affected tests,
-4. one review pass over the diff for its top 1-2 bug categories
-   (bug-hunt section 3 prompt); confirm a finding with a failing test
-   before fixing it.
-
-The light level writes no `.bughunt/` files into the repository.
-
-**Full pipeline.** Run `bug-hunt` **pipeline mode** (its section P) only when
-at least one of these holds:
-
-- the code touches money, auth, security, user data, persistence or
-  migrations, concurrency, or another path where a wrong result is silent or
-  hard to undo,
-- the task spans several independent code lanes (section 6) of real size,
-- the user asks for thorough testing, hardening or a bug-hunt.
-
-Mapping of the full pipeline onto this skill:
-
-- Before fan-out (sections 7, 9): write the spec and pre-brief (bug-hunt P0-P1).
-- Fan-out (sections 4, 6, 13): each code lane gets an impl worker plus a blind
-  test worker that owns only test files (P2).
-- While other lanes are still running: gate, test, review and fix each finished
-  lane immediately (P3). This is pipelining, not waiting for the whole wave.
-- After collecting: integrate and verify once (P4), then a targeted hunt only
-  where the risk map still points (P5).
-- Finish only when bug-hunt's done criteria hold (P6).
-
-Trivial edits (section 2) need only the check that proves them. Skip
-verification entirely only when the user explicitly asks for an unverified
-quick draft.
-
-If the task is itself a bug-hunt on existing code (the user asks to find bugs,
-harden, debug or run a bug-hunt round), use bug-hunt **round mode** (its sections
-0-7) instead: fan out the unit x category review passes in parallel, collect and
-confirm findings at the root, and let one agent apply fixes. Fixes inside a round
-are already covered by its confirm-and-fix steps; do not start a nested pipeline.
-
----
-
-# 15. Failure Handling
-
-A worker failure must not invalidate successful parallel branches.
-
-If one worker fails:
-
-1. preserve successful results,
-2. retry only the failed branch,
-3. reduce its scope if useful,
-4. handle it directly if retry overhead exceeds remaining work.
-
-Do not restart the entire orchestration wave.
-
----
-
-# 16. Stop Parallelizing When It Stops Helping
-
-Delegation has overhead.
-
-Stop creating new workers when:
-
-- remaining tasks are tiny
-- tasks strongly depend on previous results
-- ownership overlaps
-- integration cost exceeds expected time saved
-- only one critical-path task remains
-
-Finish directly.
-
----
-
-# 17. Anti-Patterns
-
-Avoid these.
-
-## Recursive agent explosion
-
-    Root -> worker -> worker -> worker
-
-without a strong justification.
-
-## Agent spam
-
-One worker for every tiny action.
-
-## Fake parallelism
-
-Launching tasks concurrently even though B requires A's result.
-
-## Duplicate repository scans
-
-Every worker independently discovering the same architecture.
-
-## Shared-file editing
-
-Several agents modifying the same implementation simultaneously.
-
-## Serial fan-out
-
-Waiting for independent workers one by one.
-
-## Duplicate verification
-
-Every worker running the complete project test suite.
-
-## Oversized context
-
-Sending irrelevant history and repository content to every worker.
-
-## Excessive narration
-
-Workers returning essays instead of actionable integration results.
-
----
-
-# 18. Completion Contract
-
-The coordinating agent owns the final result.
-
-Before finishing:
-
-1. collect relevant worker results,
-2. resolve contradictions,
-3. integrate applicable changes,
-4. inspect the final state,
-5. verify the result,
-6. for code-writing tasks: confirm the chosen quality level passed (light
-   level steps, bug-hunt's P6 done criteria for the full pipeline, or
-   team-mode's after-run checks in team mode),
-7. confirm the original user request is satisfied.
-
-The user should receive the result of orchestration, not raw orchestration
-noise.
-
----
-
-# Fast Decision Algorithm
-
-For each non-trivial task:
-
-    User asked for limit saving?  -> section 2.1 (delegate mechanical parts)
-    User asked for team mode?     -> team-mode skill
-    Is the task trivial?
-      yes -> execute directly
-      no
-       |
-       v
-    Are there 2+ independent expensive branches?
-      no -> execute directly
-      yes
-       |
-       v
-    Can they run concurrently without conflicting ownership?
-      no -> parallelize investigation only
-      yes
-       |
-       v
-    Launch minimum useful worker set together
-       |
-       v
-    Root handles separate critical-path work
-       |
-       v
-    Collect once
-       |
-       v
-    Code lanes: light check, or per-lane bug-hunt P3 if high risk
-       |
-       v
-    Integrate
-       |
-       v
-    Verify once (+ targeted hunt only if risk map says so)
-
-Remember:
-
-> Parallelism is a means, not the objective.
-
-The objective is the shortest reliable critical path.
+asks for them in the current request; never probe whether they are available.
+
+## Verification
+
+Workers run only the checks relevant to their piece; the root integrates,
+inspects the diff and verifies once. Code changes are verified before they
+are reported; testing and review are not handed back to the user. The amount
+of process scales with risk:
+
+**Light level (default)** for ordinary features, fixes and refactors: the
+project's existing type check / lint on touched files, tests for the changed
+behaviour, the affected tests run, and one review pass over the diff for its
+riskiest bug categories (bug-hunt section 3). A finding is confirmed with a
+failing test before it is fixed. Nothing is written into `.bughunt/`.
+
+**Full pipeline** (`bug-hunt` pipeline mode, its section P) when a wrong
+result would be silent or hard to undo (money, auth, security, user data,
+persistence or migrations, concurrency), when the task has several sizeable
+independent code lanes, or when the user asks for thorough testing or
+hardening. In that case the spec and the ledger's eliminated bug classes go
+into every worker's brief.
+
+If the task is itself a bug hunt on existing code, use bug-hunt **round
+mode** instead: parallel unit x category review passes, findings confirmed at
+the root, fixes applied by one agent.
+
+Trivial edits need only the check that proves them. Skip verification only
+when the user explicitly asks for an unverified draft.
+
+## Finishing
+
+The root owns the result: resolve contradictions between workers, integrate,
+inspect the final state, confirm the chosen quality level passed and that the
+original request is met. The user gets the outcome, assumptions and residual
+risk, not orchestration noise.

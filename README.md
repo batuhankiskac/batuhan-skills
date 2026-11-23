@@ -17,7 +17,7 @@ skills here treat an agent session as a loop that must end in evidence, not in a
 summary:
 
 1. **Plan and split.** `orchestrator` decomposes a task into independent workstreams, shares
-   context once and forbids recursive delegation.
+   context once and keeps delegation one level deep.
 2. **Route.** `model-routing` sends each delegated task to the cheapest model that will get it
    right the first time, with escalation rules when a cheaper model fails.
 3. **Check by risk.** Ordinary code changes get a light check (gate, tests for the changed
@@ -32,7 +32,7 @@ summary:
 
 | Skill | What it does |
 |---|---|
-| [`orchestrator`](plugins/my-skills/skills/orchestrator/SKILL.md) | Minimises wall-clock time without losing correctness: role detection (coordinator vs. delegated worker), independent workstreams, a standard brief format, file ownership to avoid edit conflicts, single integration and verification, and a list of anti-patterns (agent spam, fake parallelism, duplicate repo scans). |
+| [`orchestrator`](plugins/my-skills/skills/orchestrator/SKILL.md) | Picks a goal (speed, limit saving with an expensive root and cheap workers, or team mode), splits work by file ownership, keeps delegated workers from re-delegating, and scales verification to risk: a light check by default, the bug-hunt pipeline for high-risk code. Written as intent and rationale rather than rules, for capable models. |
 | [`team-mode`](plugins/my-skills/skills/team-mode/SKILL.md) | On explicit request, runs a large task like an automated software team through the saved [`team` workflow](workflows/team.js): scout, three blind proposals, judge, planner with file-disjoint lanes, implementer plus blind tester per lane, pipelined review/fix, integration and an adversarial final review. Claude-only; a design step ends at one user checkpoint before code is written. |
 | [`model-routing`](plugins/my-skills/skills/model-routing/SKILL.md) | Chooses a model for every subagent: small model for mechanical, fully specified work; mid-tier for normal implementation, debugging and review; top-tier for ambiguous or high-stakes reasoning. Escalates on failure instead of defaulting everything to the largest model. |
 | [`bug-hunt`](plugins/my-skills/skills/bug-hunt/SKILL.md) | Finds the most real bugs per token. **Pipeline mode** runs inside high-risk code tasks. **Round mode** hardens an existing codebase: findings ledger, deterministic gate (semgrep, bandit, pip-audit, branch coverage), risk map, one unit × one bug category per review pass, confirmation by failing test, bug-class elimination, mutation-based test pruning and a yield-based stop rule. |
