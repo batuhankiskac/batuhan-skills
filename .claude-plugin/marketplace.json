@@ -6,7 +6,7 @@
     {
       "name": "my-skills",
       "source": "./plugins/my-skills",
-      "description": "Kişisel çalışma skill'leri: orchestrator, bug-hunt, model-routing, omp, agy, ikinci-beyin-yaz"
+      "description": "Kişisel çalışma skill'leri: orchestrator, team-mode, bug-hunt, model-routing, omp, agy, ikinci-beyin-yaz"
     }
   ]
 }

@@ -3,7 +3,9 @@ name: orchestrator
 description: >
   Proactively use for every non-trivial coding, debugging, refactoring,
   investigation, research, or multi-file task where independent work can be
-  executed concurrently. Optimize wall-clock completion time by decomposing
+  executed concurrently, and whenever the user asks to save limits by
+  delegating to cheaper models (opus root, haiku/sonnet workers), even on
+  small tasks. Optimize wall-clock completion time by decomposing
   work into independent workstreams, delegating them in parallel when
   subagents are available, minimizing duplicate exploration, preventing
   recursive delegation, and performing consolidated integration and
@@ -77,7 +79,34 @@ from appearing unnecessarily.
 
 # 2. Decide Whether Orchestration Helps
 
-Do not delegate trivial tasks.
+Pick one of three goals first; they lead to different decisions.
+
+| Goal | When | Shape |
+|---|---|---|
+| **Speed** (default) | 2+ substantial independent workstreams | parallel workers, rules below |
+| **Limit saving** | the user asks for it ("ucuz modda", "limit gitmesin", "başta opus altta haiku"), or the root runs on an expensive model and the task has mechanical parts | delegation even for small tasks, see 2.1 |
+| **Team mode** | the user asks for it ("takım modunda", "ekip gibi") on a large, open-ended task | use the `team-mode` skill instead of this section |
+
+## 2.1 Limit-saving delegation
+
+The goal is to keep tokens off the expensive root model, not to save
+wall-clock time. Here even small tasks may be delegated:
+
+- The root (often opus) only decides, writes precise briefs and verifies.
+- Reading, searching, summarising logs, running commands and mechanical
+  edits go to `haiku`; ordinary implementation to `sonnet` (`model-routing`).
+- Briefs must be fully specified (exact files, exact change, exact output
+  format) because cheap models fail on ambiguity.
+- Ask for short structured returns (paths, line numbers, diff summary), never
+  full file dumps; the root reads only the lines it must check.
+- The root verifies every result itself with a cheap check (diff, test run)
+  before reporting.
+- Do not delegate when the brief would cost more to write than the work
+  itself (a one-line edit the root already has in view).
+
+## 2.2 Speed: when not to delegate
+
+Do not delegate trivial tasks for speed.
 
 Work directly for tasks such as:
 
@@ -344,6 +373,11 @@ opus by task) and pass `model` explicitly on every spawn.
 If no subagent mechanism exists, still apply the orchestration principles to
 tool calls and work ordering.
 
+External coding agents (`omp`, `agy`) exist on this machine but are optional
+support the user adds when Claude limits run low. Use them only when the user
+explicitly says so in the current request ("omp'ye ver", "agy kullan"); never
+probe or test whether they are available on your own.
+
 ---
 
 # 12. Worker Prompt Contract
@@ -591,6 +625,8 @@ noise.
 
 For each non-trivial task:
 
+    User asked for limit saving?  -> section 2.1 (delegate mechanical parts)
+    User asked for team mode?     -> team-mode skill
     Is the task trivial?
       yes -> execute directly
       no

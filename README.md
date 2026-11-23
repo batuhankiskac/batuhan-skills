@@ -33,6 +33,7 @@ summary:
 | Skill | What it does |
 |---|---|
 | [`orchestrator`](plugins/my-skills/skills/orchestrator/SKILL.md) | Minimises wall-clock time without losing correctness: role detection (coordinator vs. delegated worker), independent workstreams, a standard brief format, file ownership to avoid edit conflicts, single integration and verification, and a list of anti-patterns (agent spam, fake parallelism, duplicate repo scans). |
+| [`team-mode`](plugins/my-skills/skills/team-mode/SKILL.md) | On explicit request, runs a large task like an automated software team through the saved [`team` workflow](workflows/team.js): scout, three blind proposals, judge, planner with file-disjoint lanes, implementer plus blind tester per lane, pipelined review/fix, integration and an adversarial final review. Claude-only; a design step ends at one user checkpoint before code is written. |
 | [`model-routing`](plugins/my-skills/skills/model-routing/SKILL.md) | Chooses a model for every subagent: small model for mechanical, fully specified work; mid-tier for normal implementation, debugging and review; top-tier for ambiguous or high-stakes reasoning. Escalates on failure instead of defaulting everything to the largest model. |
 | [`bug-hunt`](plugins/my-skills/skills/bug-hunt/SKILL.md) | Finds the most real bugs per token. **Pipeline mode** runs inside high-risk code tasks. **Round mode** hardens an existing codebase: findings ledger, deterministic gate (semgrep, bandit, pip-audit, branch coverage), risk map, one unit × one bug category per review pass, confirmation by failing test, bug-class elimination, mutation-based test pruning and a yield-based stop rule. |
 | [`omp`](plugins/my-skills/skills/omp/SKILL.md) | Delegates work from Claude Code to the [oh-my-pi](https://github.com/can1357/oh-my-pi) coding agent, so two harnesses with different models can work on one task. |
@@ -52,6 +53,13 @@ In Claude Code:
 ```
 
 Update with `/plugin marketplace update batuhan-skills`.
+
+`team-mode` also needs the saved workflow, which plugins cannot ship. Link it once:
+
+```
+mkdir -p ~/.claude/workflows
+ln -sf ~/.claude/plugins/marketplaces/batuhan-skills/workflows/team.js ~/.claude/workflows/team.js
+```
 
 To load the skills automatically in a project (including cloud sessions), add this to the
 project's `.claude/settings.json`:
