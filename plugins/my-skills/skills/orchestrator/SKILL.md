@@ -85,7 +85,11 @@ Pick one of three goals first; they lead to different decisions.
 |---|---|---|
 | **Speed** (default) | 2+ substantial independent workstreams | parallel workers, rules below |
 | **Limit saving** | the user asks for it ("ucuz modda", "limit gitmesin", "başta opus altta haiku"), or the root runs on an expensive model and the task has mechanical parts | delegation even for small tasks, see 2.1 |
-| **Team mode** | the user asks for it ("takım modunda", "ekip gibi") on a large, open-ended task | use the `team-mode` skill instead of this section |
+| **Team mode** | the user asks for it ("takım modunda", "ekip gibi") on a large, open-ended task | use the `team-mode` skill instead of this skill |
+
+In team mode the team workflow already contains per-lane review/fix and an
+adversarial final review. Do not add this skill's quality levels (section 14)
+or a bug-hunt pipeline on top; the root only does team-mode's after-run checks.
 
 ## 2.1 Limit-saving delegation
 
@@ -613,7 +617,8 @@ Before finishing:
 4. inspect the final state,
 5. verify the result,
 6. for code-writing tasks: confirm the chosen quality level passed (light
-   level steps, or bug-hunt's P6 done criteria for the full pipeline),
+   level steps, bug-hunt's P6 done criteria for the full pipeline, or
+   team-mode's after-run checks in team mode),
 7. confirm the original user request is satisfied.
 
 The user should receive the result of orchestration, not raw orchestration

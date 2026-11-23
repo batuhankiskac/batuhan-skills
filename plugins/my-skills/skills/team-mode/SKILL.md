@@ -64,6 +64,9 @@ what done means, files or areas if known.
 
 ## 3. After the run (root's job)
 
+The workflow's reviews replace the orchestrator's quality levels and the
+bug-hunt pipeline: do not run another review pass. Only these checks:
+
 1. Inspect `git diff --stat` and the full test run yourself; the workflow's
    "done" is not proof.
 2. Lanes with `status: "blocked"` or open final-review findings: fix them
