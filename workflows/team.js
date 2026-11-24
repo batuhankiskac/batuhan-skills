@@ -87,9 +87,10 @@ const GIT = { type: 'object', properties: {
   not_git: { type: 'boolean' },
   head: { type: 'string' },
   stash_count: { type: 'number' },
+  entry_count: { type: 'number' },
   entries: { type: 'array', items: { type: 'object', properties: {
     status: { type: 'string' }, path: { type: 'string' }, orig_path: { type: 'string' } }, required: ['status', 'path'] } },
-}, required: ['not_git', 'head', 'stash_count', 'entries'] }
+}, required: ['not_git', 'head', 'stash_count', 'entry_count', 'entries'] }
 
 const HASHES = { type: 'object', properties: {
   hashes: { type: 'array', items: { type: 'object', properties: {
@@ -185,12 +186,16 @@ const approachText = d => typeof d === 'string' ? d
 
 // HEAD and stash count are captured too: git status cannot see commits or stashes, and
 // every agent has a shell, so an agent that commits would otherwise look like "no change".
+// The status lines are also counted by the shell: an agent copying a long listing can drop a
+// line, and a dropped line is exactly an out-of-plan change or a deleted test going unseen.
 async function gitStatus(label, ph) {
   const r = await ag(
     `From the repository root run \`${GITC} rev-parse HEAD\`, \`${GITC} stash list | wc -l\` and ` +
     `\`${GITC} -c core.quotepath=off status --porcelain=v1 -uall\`. Return head, stash_count and every status entry ` +
     'as its two-letter code and repo-root-relative path, unquoted (for renames: path = new path, orig_path = old ' +
-    `path). Change nothing. If this is not a git repository, set not_git true, head "" and no entries.${WHERE}`,
+    `path). Also run that status command piped to \`wc -l\` and return the number as entry_count; it must equal ` +
+    `the number of entries you return. Change nothing. If this is not a git repository, set not_git true, head "", ` +
+    `entry_count 0 and no entries.${WHERE}`,
     { label, phase: ph, schema: located(GIT), model: M.guard, agentType: 'Explore' })
   if (!r) return null
   // An answer that cannot be trusted stops the run before anything is edited. At the end of
@@ -200,6 +205,8 @@ async function gitStatus(label, ph) {
     (A.repo ? ` (looked at ${A.repo})` : '. If the session cwd is not the target repository, pass args.repo'))
   if (elsewhere(r)) return reject(whereRan(r))
   if (!r.head.trim()) return reject('git reported no HEAD commit; team mode needs a commit to diff against')
+  if (r.entry_count !== r.entries.length)
+    return reject(`git status has ${r.entry_count} line(s) but ${r.entries.length} were returned; the listing is incomplete`)
   return { head: r.head.trim(), stash: r.stash_count, entries: r.entries.map(e => ({
     status: e.status.trim(), path: norm(e.path), orig: e.orig_path ? norm(e.orig_path) : null })) }
 }

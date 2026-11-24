@@ -11,6 +11,8 @@
 // To prove that an edit left the prompts byte-identical, compare against an older copy:
 //   git show HEAD:workflows/team.js > /tmp/team-old.js
 //   TEAM_BASELINE=/tmp/team-old.js node tests/team.test.mjs
+// (Against 1.8.0 or older that comparison fails on purpose: 1.8.1 added the status line
+// count to the git-status prompt.)
 import { readFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
 
@@ -35,7 +37,7 @@ const pipeline = (items, ...stages) => Promise.all(items.map((item, i) =>
 const LANE = { id: 'L1', goal: 'add a()', files: ['src/a.js'], test_files: ['tests/a.test.js'], interfaces: 'a(): number',
   test_command: 'node --test tests/a.test.js', acceptance_ids: ['A1'], categories: ['ERR'] }
 const PLAN = { acceptance: [{ id: 'A1', text: 'a() returns 1' }], invariants: [], non_goals: [], integration_files: [], lanes: [LANE] }
-const git = (entries, head = 'h0') => ({ not_git: false, head, stash_count: 0, entries })
+const git = (entries, head = 'h0') => ({ not_git: false, head, stash_count: 0, entry_count: entries.length, entries })
 const hashes = hash => ({ hashes: [{ path: 'tests/a.test.js', hash }] })
 const work = (extra = {}) => ({ status: 'done', changed_files: [], summary: 'ok', ...extra })
 const CLEAN = { findings: [] }
@@ -248,6 +250,21 @@ test('a git answer that cannot be trusted stops the run at Check but never throw
     assert.equal(r.result.ok, false, kind)
     assert.equal(r.result.lanes[0].status, 'clean', `${kind}: the run's results survive`)
   }
+})
+
+test('a git status listing shorter or longer than the shell counted is not believed', async () => {
+  // The agent dropped the out-of-plan line; without the count this run would be ok.
+  const dropped = { ...git(PLANNED_DIFF), entry_count: 3 }
+  const r = await run({}, { 'scope-check': dropped })
+  assert.match(problems(r), /scope check: no result/)
+  assert.equal(r.result.ok, false)
+  assert.ok(r.logs.some(l => /git status has 3 line\(s\) but 2 were returned/.test(l)))
+  const extra = await run({}, { 'scope-check': { ...git(PLANNED_DIFF), entry_count: 1 } })
+  assert.equal(extra.result.ok, false)
+  const atCheck = await run({}, { 'pre-check': { ...git([]), entry_count: 1 } })
+  assert.match(atCheck.error.message, /git status has 1 line\(s\) but 0 were returned/)
+  assert.deepEqual(atCheck.labels, ['pre-check'])
+  assert.ok(r.calls[0].prompt.includes('status --porcelain=v1 -uall`') && r.calls[0].prompt.includes('piped to `wc -l`'))
 })
 
 // ---- repo / guard ------------------------------------------------------------------------

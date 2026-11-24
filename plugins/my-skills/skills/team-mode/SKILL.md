@@ -32,6 +32,8 @@ renamed away, and every test file whose hash changed after the blind tests
 has a stated reason in `test_changes`. Two more ask for positive evidence
 that the guards looked at the tree the team worked in: the planned test
 files exist after the build, and reported edits show up in git status.
+The git status listing must also match the line count the shell reports, so
+a line the guard agent dropped cannot hide a change.
 `cheap: true` runs two ideators and puts judge, planner and final reviewer
 on sonnet.
 
