@@ -33,7 +33,7 @@ summary:
 | Skill | What it does |
 |---|---|
 | [`orchestrator`](plugins/my-skills/skills/orchestrator/SKILL.md) | Picks a goal (speed, limit saving with an expensive root and cheap workers, or team mode), splits work by file ownership, keeps delegated workers from re-delegating, and scales verification to risk: a light check by default, the bug-hunt pipeline for high-risk code. Written as intent and rationale rather than rules, for capable models. |
-| [`team-mode`](plugins/my-skills/skills/team-mode/SKILL.md) | On explicit request, runs a large task like an automated software team through the saved [`team` workflow](workflows/team.js): scout, three blind proposals, judge, planner with file-disjoint lanes, implementer plus blind tester per lane, pipelined review/fix, integration, an adversarial final review and a scope check. Lanes run only their own tests while others edit; a missing agent result never counts as a pass, and the run returns `ok` plus a list of open problems. Claude-only; a design step ends at one user checkpoint before code is written. |
+| [`team-mode`](plugins/my-skills/skills/team-mode/SKILL.md) | On explicit request, runs a large task like an automated software team through the saved [`team` workflow](workflows/team.js): scout, three blind proposals, judge, planner with file-disjoint lanes, implementer plus blind tester per lane, pipelined review/fix, integration, an adversarial final review and a scope check. Lanes run only their own tests while others edit; a missing agent result never counts as a pass, and the run returns `ok` plus a list of open problems. Claude-only; a design step ends at one user checkpoint before code is written. With `repo` it works on a checkout other than the session's working directory (a separate worktree when a scheduler runs the live one), and `guard` gives every agent the run's hard limits. |
 | [`model-routing`](plugins/my-skills/skills/model-routing/SKILL.md) | Chooses a model for every subagent: small model for mechanical, fully specified work; mid-tier for normal implementation, debugging and review; top-tier for ambiguous or high-stakes reasoning. Escalates on failure instead of defaulting everything to the largest model. |
 | [`bug-hunt`](plugins/my-skills/skills/bug-hunt/SKILL.md) | Finds the most real bugs per token. **Pipeline mode** runs inside high-risk code tasks. **Round mode** hardens an existing codebase: findings ledger, deterministic gate (semgrep, bandit, pip-audit, branch coverage), risk map, one unit × one bug category per review pass, confirmation by failing test, bug-class elimination, mutation-based test pruning and a yield-based stop rule. |
 | [`omp`](plugins/my-skills/skills/omp/SKILL.md) | Delegates work from Claude Code to the [oh-my-pi](https://github.com/can1357/oh-my-pi) coding agent, so two harnesses with different models can work on one task. |
@@ -97,10 +97,16 @@ plugins/my-skills/
   skills/<name>/SKILL.md             one skill per folder
   skills/<name>/references/          templates loaded on demand
   skills/<name>/agents/openai.yaml   Codex metadata (display name, default prompt)
+workflows/team.js                    saved workflow behind team-mode (linked into ~/.claude/workflows)
+tests/team.test.mjs                  scenario tests for the workflow, run with fake agents
 ```
 
 To add a skill: create `plugins/my-skills/skills/<name>/SKILL.md`, bump `version` in
 `plugin.json` and push.
+
+After changing `workflows/team.js`, run `node tests/team.test.mjs`. The tests replace the
+runtime's agents with scripted answers, so they cover the script's control flow and the exact
+prompt text, not how a model reacts to it.
 
 ## Status
 

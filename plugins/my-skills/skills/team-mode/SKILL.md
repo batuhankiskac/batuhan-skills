@@ -29,8 +29,11 @@ Roles and default models (override with `models`, or `cheap: true`):
 prompts are not enforcement. The end-of-run checks are: HEAD and stash list
 unchanged, every changed file belongs to the plan, no test file deleted or
 renamed away, and every test file whose hash changed after the blind tests
-has a stated reason in `test_changes`. `cheap: true` runs two ideators and puts judge, planner and final
-reviewer on sonnet.
+has a stated reason in `test_changes`. Two more ask for positive evidence
+that the guards looked at the tree the team worked in: the planned test
+files exist after the build, and reported edits show up in git status.
+`cheap: true` runs two ideators and puts judge, planner and final reviewer
+on sonnet.
 
 External agents (`omp`, `agy`) are not part of the team. Use them only when
 the user says so in the current request (for example "reviewer'ı agy
@@ -42,9 +45,10 @@ skill instead of the workflow stage. Never probe whether they are available.
 1. Confirm the task is large and open-ended; otherwise tell the user in one
    line that the orchestrator's normal levels fit better, and use those
    unless they insist.
-2. The repository must be a git repo with a clean working tree; the workflow
-   refuses to build otherwise. Do not stash or commit the user's work
-   yourself; ask them to.
+2. The target repository (the session's working directory, or `repo`, see
+   below) must be a git repo with a clean working tree; the workflow refuses
+   to build otherwise. Do not stash or commit the user's work yourself; ask
+   them to.
 3. The Workflow tool needs explicit opt-in; the user's "takım modu" request
    is that opt-in.
 
@@ -66,7 +70,8 @@ so the codebase is not mapped twice:
 
 If the user asked for full autonomy ("sormadan bitir"), use `mode: "full"`
 in one run. Other args: `maxLanes` (default 4), `cheap`, `models` (for
-example `{ final: "opus", build: "haiku" }`), `maxFixLoops`.
+example `{ final: "opus", build: "haiku" }`), `maxFixLoops`, and `repo` /
+`guard` for a repository the session is not in (below).
 
 If the saved name `team` is not found, pass the script path instead:
 `Workflow({ scriptPath: "/Users/batuhankiskac/.claude/workflows/team.js", args: {...} })`
@@ -74,6 +79,30 @@ If the saved name `team` is not found, pass the script path instead:
 
 Write the task brief like for a colleague with no context: goal, constraints,
 what done means, files or areas if known.
+
+### When the session is not in the target repository
+
+Every agent starts in the session's working directory, and the git guard
+agents get no task text. From a session opened elsewhere (a notes vault, say)
+the run therefore stops at Check with "not a git repository", or, if that
+directory happens to be a git repository itself, works on the wrong one,
+whatever the brief says. Pass `repo: "<absolute path of the checkout>"` then:
+each agent is told where the checkout is and that "repository root" and
+repo-relative paths mean that directory. Spell the path the way
+`git rev-parse --show-toplevel` prints it there (no symlinked prefix): the
+guard agents report the top level git saw, and an answer from anywhere else
+is not believed.
+
+Use `repo` as well when a scheduler (launchd, cron) runs the target's live
+checkout. Lanes edit files in place for the whole run, so the scheduler would
+execute half-written code; create a separate git worktree (`git worktree add`)
+and point `repo` at that instead. `guard` is free text holding the run's hard
+limits, for example "never read or write under <live checkout>"; it goes to
+every agent together with `repo`, and the workflow rejects it without `repo`
+rather than drop it silently.
+
+Pass the same `repo` and `guard` in every step (design, build, lane reruns),
+and run your own after-run checks in that checkout.
 
 ## 3. After the run (root's job)
 

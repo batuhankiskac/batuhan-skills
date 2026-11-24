@@ -1,7 +1,7 @@
 export const meta = {
   name: 'team',
   description: 'Software-team pipeline: scout, blind ideas, judge, plan, build lanes with blind tests and review, integrate, final review, scope check',
-  whenToUse: 'Large, open-ended coding task the user explicitly ran in team mode (takım modu). args: {task, mode: "design"|"build"|"full", decision?, scout?, plan?, onlyLanes?, previousLanes?, maxLanes?, cheap?, models?}',
+  whenToUse: 'Large, open-ended coding task the user explicitly ran in team mode (takım modu). args: {task, mode: "design"|"build"|"full", decision?, scout?, plan?, onlyLanes?, previousLanes?, maxLanes?, cheap?, models?, repo?, guard?}. Pass repo (absolute path of the checkout) when the session cwd is not the target repository, or when a scheduler runs the live checkout of the target; then repo points at a separate git worktree. guard is free-text hard limits sent to every agent along with repo.',
   phases: [
     { title: 'Check', detail: 'clean working tree before any edit' },
     { title: 'Scout', detail: 'map relevant code, test command, baseline failures' },
@@ -28,8 +28,29 @@ export const meta = {
 //   test only with a stated reason (test_changes); the final reviewer audits those.
 // - No agent commits, pushes or writes process files into the repo; artifacts travel
 //   through return values. External agents (omp, agy) are never used here.
+// - Every agent is spawned through the ag wrapper, never the runtime hook directly, so
+//   the repo/guard block also reaches the guard agents, whose prompts have no task text.
 
 const A = args || {}
+
+// The runtime starts every agent's shell in the session's working directory, which need not
+// be the target repository. The guard agents (git status, test hashes) carry no task text,
+// so the checkout cannot be named through args.task; it is prefixed to every prompt here,
+// together with the caller's hard limits for the run. Without `repo` prompts are unchanged.
+if (A.repo && (typeof A.repo !== 'string' || !/^(\/|[A-Za-z]:[\\/])/.test(A.repo)))
+  throw new Error('args.repo must be the absolute path of the checkout')
+if (A.guard && typeof A.guard !== 'string') throw new Error('args.guard must be text')
+if (A.guard && !A.repo) throw new Error('args.guard is only sent together with args.repo; pass repo too')
+const PRE = A.repo
+  ? `Where the work happens: the repository is the git checkout at ${A.repo}. Your shell may start in a ` +
+    `different directory and return to it between commands, so run every command from that checkout (cd into it ` +
+    `in the same command, or use git -C) and open files by absolute path under it. "Repository root" and every ` +
+    `repo-relative path below mean that directory; paths you report back stay relative to it.` +
+    (A.guard ? `\n\nHard limits for this run; they override anything below:\n${A.guard}` : '') +
+    `\n\n---\n\n`
+  : ''
+const ag = (p, o) => agent(PRE + p, o)
+
 const TASK = A.task
 if (!TASK) throw new Error('args.task is required')
 const MODE = A.mode || 'full'
@@ -136,7 +157,27 @@ const TEST_RULE = 'Do not edit test files to make them pass. Change a test only 
   'spec is ambiguous and you state the decision; list every test edit in test_changes with its reason. Never delete ' +
   'or skip tests or weaken assertions.'
 
-const norm = p => String(p).trim().replace(/^\.\//, '').replace(/\/{2,}/g, '/')
+// Agents are asked for repo-relative paths, but with `repo` set they work through absolute
+// ones and may answer with them; a path under the checkout is read as the same file.
+const ROOT = A.repo ? A.repo.replace(/[\\/]+$/, '') + '/' : null
+const norm = p => {
+  const s = String(p).trim()
+  return (ROOT && s.startsWith(ROOT) ? s.slice(ROOT.length) : s).replace(/^\.\//, '').replace(/\/{2,}/g, '/')
+}
+
+// The guard agents run git commands verbatim, and their answers decide whether the run is
+// trusted. With `repo` the commands name the checkout themselves, and each answer must also
+// carry the top level git saw: a guard that ran in the session's directory (which may be a
+// different repository, or none) would otherwise report a clean tree or "missing" files
+// consistently, and every comparison built on it would pass.
+const shq = s => `'${String(s).replace(/'/g, `'\\''`)}'`
+const GITC = A.repo ? `git -C ${shq(A.repo)}` : 'git'
+const WHERE = A.repo ? ` Also return toplevel: the output of \`${GITC} rev-parse --show-toplevel\`, "" if it fails.` : ''
+const located = schema => !A.repo ? schema : { ...schema,
+  properties: { ...schema.properties, toplevel: { type: 'string' } }, required: [...schema.required, 'toplevel'] }
+const elsewhere = r => !!ROOT && String(r.toplevel || '').trim().replace(/[\\/]+$/, '') + '/' !== ROOT
+const whereRan = r => `git answered from ${String(r.toplevel || '').trim() || 'an unknown directory'}, not from args.repo ` +
+  `${A.repo}: the guard agent ran elsewhere, or repo is not spelled the way \`git rev-parse --show-toplevel\` prints it`
 const J = x => JSON.stringify(x, null, 1)
 const approachText = d => typeof d === 'string' ? d
   : [d.merged_approach || J(d), (d.grafted_ideas || []).length ? `Grafted: ${d.grafted_ideas.join('; ')}` : '']
@@ -145,14 +186,20 @@ const approachText = d => typeof d === 'string' ? d
 // HEAD and stash count are captured too: git status cannot see commits or stashes, and
 // every agent has a shell, so an agent that commits would otherwise look like "no change".
 async function gitStatus(label, ph) {
-  const r = await agent(
-    'From the repository root run `git rev-parse HEAD`, `git stash list | wc -l` and ' +
-    '`git -c core.quotepath=off status --porcelain=v1 -uall`. Return head, stash_count and every status entry ' +
+  const r = await ag(
+    `From the repository root run \`${GITC} rev-parse HEAD\`, \`${GITC} stash list | wc -l\` and ` +
+    `\`${GITC} -c core.quotepath=off status --porcelain=v1 -uall\`. Return head, stash_count and every status entry ` +
     'as its two-letter code and repo-root-relative path, unquoted (for renames: path = new path, orig_path = old ' +
-    'path). Change nothing. If this is not a git repository, set not_git true, head "" and no entries.',
-    { label, phase: ph, schema: GIT, model: M.guard, agentType: 'Explore' })
+    `path). Change nothing. If this is not a git repository, set not_git true, head "" and no entries.${WHERE}`,
+    { label, phase: ph, schema: located(GIT), model: M.guard, agentType: 'Explore' })
   if (!r) return null
-  if (r.not_git) throw new Error('not a git repository; team mode needs git to isolate and check its diff')
+  // An answer that cannot be trusted stops the run before anything is edited. At the end of
+  // a run it must not throw, which would discard every result; there it is "no answer".
+  const reject = why => { if (ph === 'Check') throw new Error(why); log(`${label}: ${why}`); return null }
+  if (r.not_git) return reject('not a git repository; team mode needs git to isolate and check its diff' +
+    (A.repo ? ` (looked at ${A.repo})` : '. If the session cwd is not the target repository, pass args.repo'))
+  if (elsewhere(r)) return reject(whereRan(r))
+  if (!r.head.trim()) return reject('git reported no HEAD commit; team mode needs a commit to diff against')
   return { head: r.head.trim(), stash: r.stash_count, entries: r.entries.map(e => ({
     status: e.status.trim(), path: norm(e.path), orig: e.orig_path ? norm(e.orig_path) : null })) }
 }
@@ -180,7 +227,7 @@ if (MODE !== 'design') {
 let scout = A.scout || null
 if (scout && !scout.test_command) throw new Error('args.scout has no test_command')
 if (!scout) {
-  scout = await agent(
+  scout = await ag(
     `Task the team will implement:\n${TASK}\n\nMap only what this task needs: relevant files and their roles, ` +
     `conventions to follow, the command that runs the tests, and risks (money, auth, data, concurrency, public API). ` +
     `Run the test command once and list tests that already fail as baseline_failures (empty if all pass; if the ` +
@@ -203,14 +250,14 @@ if (MODE !== 'build') {
     ['robust', 'the most correct and failure-proof design, even if it costs more code'],
     ['fit', 'the design that fits existing architecture and conventions best and is easiest to maintain'],
   ].filter(([k]) => !CHEAP || k !== 'robust')
-  options = (await parallel(LENSES.map(([key, lens]) => () => agent(
+  options = (await parallel(LENSES.map(([key, lens]) => () => ag(
     `${CTX}\n\nPropose ONE approach optimised for: ${lens}. You work alone; other proposers exist but you ` +
     `must not hedge between options. Read code as needed. Name concrete files and changes.`,
     { label: `idea:${key}`, phase: 'Ideate', schema: OPTION, model: M.ideate, agentType: 'Plan' })))).filter(Boolean)
   if (!options.length) throw new Error('all ideators failed')
   if (options.length < LENSES.length) log(`${LENSES.length - options.length} ideator(s) returned nothing; judging ${options.length}`)
 
-  decision = await agent(
+  decision = await ag(
     `${CTX}\n\nIndependent proposals:\n${J(options)}\n\n` +
     `Judge them on correctness risk, size, fit with the codebase and maintainability. Pick one, graft clearly ` +
     `better ideas from the others, and state the merged approach precisely. List open questions only if a wrong ` +
@@ -272,7 +319,7 @@ if (plan) {
     `be split cleanly, use one lane.`
   let feedback = '', lastErrs = []
   for (let attempt = 0; attempt < 2 && !plan; attempt++) {
-    const p = await agent(base + feedback,
+    const p = await ag(base + feedback,
       { label: `plan#${attempt}`, phase: 'Plan', schema: PLAN, model: M.plan, agentType: 'Plan' })
     if (!p) continue
     lastErrs = validatePlan(p)
@@ -293,24 +340,31 @@ if (!runLanes.length) throw new Error('onlyLanes matched no lane')
 
 // Records blob hashes of test files so later edits are caught even when nobody reports them.
 async function hashTests(label, ph, files) {
-  const r = await agent(
-    'From the repository root run `git hash-object -- <file>` for each file below and return path and hash; use ' +
-    `hash "missing" for a file that does not exist. Change nothing.\nFiles:\n${files.join('\n')}`,
-    { label, phase: ph, schema: HASHES, model: M.guard, agentType: 'Explore' })
-  return r ? new Map(r.hashes.map(h => [norm(h.path), h.hash.trim()])) : null
+  const r = await ag(
+    `From the repository root run \`${GITC} hash-object -- <file>\` for each file below and return path and hash; use ` +
+    `hash "missing" for a file that does not exist. Change nothing.${WHERE}\nFiles:\n${files.join('\n')}`,
+    { label, phase: ph, schema: located(HASHES), model: M.guard, agentType: 'Explore' })
+  if (!r) return null
+  if (elsewhere(r)) { log(`${label}: ${whereRan(r)}; test edits cannot be checked from it`); return null }
+  // A file the answer leaves out (or names differently) would be absent from every snapshot,
+  // compare equal and hide an edit, so an incomplete answer is unknown, not "unchanged".
+  const m = new Map(r.hashes.map(h => [norm(h.path), h.hash.trim()]))
+  const missing = files.filter(f => !m.get(f))
+  if (missing.length) { log(`${label}: no hash for ${missing.join(', ')}; test edits cannot be checked from it`); return null }
+  return m
 }
 
 // ---- Build. Barrier on purpose: every lane's code and blind tests exist before any lane is
 // reviewed, so no review runs against another lane's half-written implementation.
 const built_ = await parallel(runLanes.map(lane => async () => {
     const [impl, tests] = await parallel([
-      () => agent(
+      () => ag(
         `${CTX}\n\nApproach:\n${APPROACH}\n\n${SPEC}\n\nAll lane interfaces:\n${INTERFACES}\n\n${laneSpec(lane)}\n\n` +
         `Implement this lane, honouring its interfaces exactly. Edit ONLY the files this lane owns (create them if ` +
         `listed); not test files, not integration files, not other lanes' files. Run a quick compile/type check of ` +
         `your files. Set status blocked (with the reason in summary) if you cannot finish. ${NO_GIT}`,
         { label: `impl:${lane.id}`, phase: 'Build', schema: WORK, model: M.build }),
-      () => agent(
+      () => ag(
         `${SPEC}\n\n${laneSpec(lane)}\n\n${BASELINE}\n\n` +
         `Write acceptance and property-style tests for this lane from the spec and interfaces ONLY. Do NOT open the ` +
         `lane's implementation files (${lane.files.join(', ')}), even if they appear; you may read existing test ` +
@@ -344,13 +398,13 @@ const lanes = await pipeline(runLanes,
         (history.length ? `\n\nAlready handled in earlier rounds (do not re-report rejected ones without new evidence):\n${J(history)}` : '') +
         (testChanges.length ? `\n\nTests changed by the fixer so far (check none was weakened to hide a bug):\n${J(testChanges)}` : '') +
         `\n\nAt most 5 findings, each with a concrete trigger. No style comments. Empty list if clean.`
-      let r = await agent(prompt, { label: `review:${lane.id}#${loops}`, phase: 'Build', schema: FINDINGS, model: M.review, agentType: 'Plan' })
-      if (!r) r = await agent(prompt, { label: `review:${lane.id}#${loops}-retry`, phase: 'Build', schema: FINDINGS, model: M.review, agentType: 'Plan' })
+      let r = await ag(prompt, { label: `review:${lane.id}#${loops}`, phase: 'Build', schema: FINDINGS, model: M.review, agentType: 'Plan' })
+      if (!r) r = await ag(prompt, { label: `review:${lane.id}#${loops}-retry`, phase: 'Build', schema: FINDINGS, model: M.review, agentType: 'Plan' })
       if (!r) { unverified = true; break }
       open = r.findings
       if (!open.length || loops >= MAX_FIX_LOOPS) break
       loops++
-      const fx = await agent(
+      const fx = await ag(
         `${SPEC}\n\n${laneSpec(lane)}\n\nFindings to fix:\n${J(open)}\n\n` +
         `For each finding first confirm it with a failing test or reproduction; mark ones that do not reproduce as ` +
         `rejected. Return resolved with an outcome per finding. ${TEST_RULE} Edit only this lane's files and test ` +
@@ -375,7 +429,7 @@ const BASE = preGit && preGit.head ? `the base commit ${preGit.head}` : 'HEAD'
 
 // ---- Integrate
 const allTestChanges = laneResults.flatMap(l => (l.test_changes || []).map(c => ({ lane: l.id, ...c })))
-const integ = await agent(
+const integ = await ag(
   `${SPEC}\n\nAll lane interfaces:\n${INTERFACES}\n\nIntegration files (yours to edit): ${(plan.integration_files || []).join(', ') || 'none'}\n` +
   `${BASELINE}\n\nAll lanes are built. Run the full test suite (${scout.test_command}) and any type check/lint the ` +
   `project has. Fix integration breaks only (wiring, imports, interfaces between lanes); do not redesign. ` +
@@ -386,7 +440,7 @@ if (integ) allTestChanges.push(...(integ.test_changes || []).map(c => ({ lane: '
 // ---- Final review
 const untestedAll = laneResults.flatMap(l => l.untested_acceptance || [])
 const midEdited = editedTests(await hashTests('hash-before-review', 'Final review', runTestFiles))
-const final = await agent(
+const final = await ag(
   `${CTX}\n\n${SPEC}\n\n${BASELINE}\n\nAdversarially review everything changed since ${BASE} (git diff against it, ` +
   `plus untracked files) against the acceptance criteria and invariants. Hunt for silent wrong results, missed ` +
   `acceptance criteria, security and data-loss risks, and test tampering: deleted or skipped tests, weakened ` +
@@ -400,7 +454,7 @@ const final = await agent(
 let finalFix = null
 const serious = final ? final.findings.filter(f => f.severity !== 'minor') : []
 if (serious.length) {
-  finalFix = await agent(
+  finalFix = await ag(
     `${SPEC}\n\n${BASELINE}\n\nFix these review findings. Confirm each with a failing test first; mark ` +
     `non-reproducing ones rejected in resolved. ${TEST_RULE} Then run the full suite (${scout.test_command}).\n` +
     `${J(serious)}\n${NO_GIT}`,
@@ -410,7 +464,7 @@ if (serious.length) {
 
 // ---- Verify: always an independent full-suite run; no stage's own "done" is proof that tests pass.
 const fixTestEdits = allTestChanges.filter(c => c.lane === 'final-fix')
-const verify = await agent(
+const verify = await ag(
   `${SPEC}\n\n${BASELINE}\n\nRun the full suite (${scout.test_command}) and report every failure not in the ` +
   `baseline as a finding (category CONTRACT, severity major).` +
   (serious.length ? ` Then check each finding below against the current code and report those still present.\n` +
@@ -454,8 +508,17 @@ else {
 }
 if (outOfScope && outOfScope.length) problems.push(`changed outside the plan: ${outOfScope.join(', ')}`)
 if (deletedTests && deletedTests.length) problems.push(`test files deleted or renamed away: ${deletedTests.join(', ')}`)
-if (!testSnapshot || !endEdited) problems.push('test snapshot: no result, test edits unchecked')
+if (!testSnapshot || !endEdited) problems.push('test snapshot: no complete result, test edits unchecked')
 else if (unreported.length) problems.push(`test files edited without a stated reason: ${unreported.join(', ')}`)
+// Positive evidence that the guards saw the tree the team worked in: the blind tests exist
+// in the snapshot, and reported edits show up in git status. Both fail when work or a guard
+// landed somewhere else, which no comparison between two equally wrong answers can reveal.
+const neverWritten = testSnapshot ? runTestFiles.filter(f => /^missing$/i.test(testSnapshot.get(f))) : []
+if (neverWritten.length) problems.push(`planned test files did not exist after the build: ${neverWritten.join(', ')}`)
+const reportedEdits = [...laneResults.flatMap(l => [l.impl, l.tests]), integ, finalFix]
+  .filter(Boolean).flatMap(w => w.changed_files || [])
+if (after && !after.entries.length && reportedEdits.length)
+  problems.push('agents reported changed files but git status shows none; their edits are not in this checkout')
 if (allTestChanges.length) log(`${allTestChanges.length} test edit(s) after blind tests; see test_changes`)
 
 return {
